@@ -1,12 +1,14 @@
-# 保证批处理文件在所有平台以 CRLF 检出 (cmd.exe 对 LF 兼容性差)
+# 保证批处理 / PowerShell 文件在所有平台以 CRLF 检出 (cmd.exe 与 PS5 对 LF 兼容性差)
 *.bat text eol=crlf
 *.cmd text eol=crlf
+*.ps1 text eol=crlf
+lang/*.txt text eol=crlf
 
 # 文本文件统一按 LF 检出, 避免仓库内出现混合换行
 *.md  text eol=lf
-*.txt text eol=lf
 *.py  text eol=lf
 
 # 二进制文件不做任何转换
 *.rom binary
 *.exe binary
+*.zip binary

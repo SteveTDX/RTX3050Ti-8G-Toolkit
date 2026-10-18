@@ -2,7 +2,7 @@
 
 Windows 批处理工具集：检测环境、查看状态、**自选功耗**、刷写官方签名 vBIOS、配置**开机自动应用功耗**。
 
-针对"4 GB 颗粒魔改为 8 GB"的 RTX 3050 Ti Laptop 显卡设计，所有脚本在执行前会自动校验本机环境（型号、驱动、文件完整性、功耗范围），不匹配时主动中止。
+针对"4 GB 颗粒魔改为 8 GB"的 RTX 3050 Ti Laptop 显卡设计。所有脚本在执行前会自动校验本机环境（系统版本、驱动、硬件 ID、显存、文件完整性、功耗范围、平台是否变更），不匹配时主动中止并说明原因。
 
 ---
 
@@ -20,38 +20,81 @@ Windows 批处理工具集：检测环境、查看状态、**自选功耗**、�
 
 ## 快速开始
 
-### 1. 获取与自检
+### 0. 三条命令上手
 
 ```bat
-:: 双击 menu.bat 选择 [1] 环境自检, 或直接运行
-scripts\env_check.bat
+bootstrap.bat                      :: 检查/修复运行环境（缺目录、缺文件、启动项失效）
+scripts\preflight.bat              :: 环境预检（系统/驱动/硬件/文件/平台变更）
+menu.bat                           :: 进入菜单，日常操作都在这里
 ```
 
-自检会输出：显卡型号、驱动状态、当前功耗范围、工具/ROM 完整性、开机启动项状态。
+`menu.bat` 首屏会直接显示：系统版本、权限、显卡型号、设备状态、DEV ID、显存、当前功耗范围。
 
-### 2. 设置功耗（最常用）
+### 1. 设置功耗（最常用）
 
 ```bat
-:: 交互式: 直接回车脚本, 输入瓦数
-scripts\set_powerlimit.bat
-
-:: 或直接指定
-scripts\set_powerlimit.bat 45
+scripts\set_powerlimit.bat         :: 交互式
+scripts\set_powerlimit.bat 45      :: 直接指定
+scripts\set_powerlimit.bat 0       :: 恢复固件默认值
 ```
 
-- 可设范围由固件声明（通常 1 W ~ Max）。超出范围会被拒绝并给出提示。
-- 设置结果自动保存到 `config\power_profile.txt`。
+- 可设范围由固件声明（通常 1 W ~ Max），超出范围会被拒绝。
+- 应用后**回读校验**，生效才写入 `config\power_profile.txt`。
 
-### 3. 开机自动应用功耗（可选）
+### 2. 开机自动应用功耗（可选）
 
 ```bat
-setup\install_startup.bat     :: 安装（需管理员，自动提权）
-setup\remove_startup.bat      :: 卸载
+setup\install_startup.bat          :: 安装（自动提权）
+setup\remove_startup.bat           :: 卸载
 ```
 
-安装后创建计划任务 `RTX3050Ti8G-PowerProfile`：用户登录后延迟 30 秒、以最高权限运行 `scripts\startup_apply.bat`，读取 `config\power_profile.txt` 并应用。
+安装后创建计划任务 `RTX3050Ti8G-PowerProfile`：登录后延迟 30 秒、最高权限、隐藏窗口运行 `scripts\startup_apply.bat`。
 
-**安全设计**：配置不存在、数值非法、显卡驱动未就绪（最多等待 60 秒）、或数值超出固件上限时，脚本**静默退出，不做任何修改**，绝不触碰固件。
+**安全设计**：配置不存在、数值非法、驱动未就绪（最多等 60 秒）、数值超出固件上限时，脚本**静默退出，不做任何修改**。
+
+### 3. 刷写 / 回滚
+
+```bat
+scripts\flash_80w.bat              :: 刷 80W（强制先备份，二次确认）
+scripts\flash_60w.bat              :: 回原厂（优先用本机备份）
+scripts\backup_vbios.bat           :: 只备份当前 vBIOS
+scripts\restore_backup.bat         :: 从历史备份中选一个刷回
+```
+
+---
+
+## 兼容性与自适应行为
+
+### 系统兼容矩阵
+
+| 项目 | 支持范围 | 说明 |
+|---|---|---|
+| Windows 10 | 1809 (build 17763) 及以上 | 低于此版本直接拒绝 |
+| Windows 11 | 21H2 起全部版本，含未来小版本 | 不按版本号硬编码，只按 build 判定 |
+| 架构 | x64 / ARM64（x64 模拟） | 非 AMD64 只告警不中止 |
+| PowerShell | 5.1（系统自带） | 缺失或版本过低 → 预检降级为纯批处理路径 |
+| 语言/区域 | 任意 | 所有中文 UI 文本外置到 `lang\zh-CN.txt`，脚本本身纯 ASCII |
+| 权限 | 普通用户可查；刷写/设功耗自动 UAC 提权 | 非管理员会明确报错而不是静默挂起 |
+
+> **版本号不写死**：所有判断基于 `build` 数字与运行时探测结果，Windows 11 每次功能更新（22H2 / 23H2 / 24H2 / 26H2 …）都不需要改代码。
+
+### 三类"环境变了"的场景
+
+| 场景 | 检测方式 | 工具行为 |
+|---|---|---|
+| **缺软件环境**（驱动未装 / nvidia-smi 丢失 / PowerShell 被裁剪 / ROM 缺失） | `scripts\lib\probe.ps1` 三级探测：`Get-PnpDevice` → `Win32_VideoController` → 注册表 `Enum\PCI`；驱动缺失时仍能读到硬件 ID 与显存 | 预检返回 2（可运行但告警）或 1（阻断），并给出具体修复命令；`bootstrap.bat` 能自动建目录、校验工具哈希、按 `RTX3050TI_NVFLASH_URL` 重新下载 nvflash |
+| **换主板 / 换 CPU / 整机更换** | `config\machine_profile.txt` 记录 `gpu_dev / gpu_subsys / gpu_vram_mb`，每次预检比对 | 首次运行写"新记录"；`DEV/SUBSYS/显存` 任一变化 → 标红"平台已变更"，**强制走备份流程**再允许刷写 |
+| **换系统 / 换盘 / 目录搬家** | 计划任务里存的是绝对路径，预检用 `findstr` 比对当前根目录 | 路径失效 → 告警"已安装但路径指向旧目录"，并提示重跑 `setup\install_startup.bat` 自动重建 |
+
+### 刷写安全链（缺一不可）
+
+```
+require_admin → preflight(0/2 才继续) → DEV==25A0 → 设备状态==OK
+  → 驱动已加载 → 强制备份 → 备份文件 ≥ 900000 字节
+  → 用户输入 YES → nvflash --protectoff → 刷写 → 分类结果
+```
+
+任一步失败即中止，**绝不在无备份的情况下写入固件**。
 
 ---
 
@@ -59,15 +102,20 @@ setup\remove_startup.bat      :: 卸载
 
 | 脚本 | 作用 | 需要管理员 |
 |---|---|---|
-| `menu.bat` | 统一入口菜单 | 否（执行具体操作时自动提权） |
-| `scripts\env_check.bat` | 环境自检 | 否 |
-| `scripts\status.bat` | 查看显存/功耗/频率/温度/BIOS 版本 | 否（读 BIOS 版本需要） |
+| `menu.bat` | 统一入口菜单（12 项） | 否（具体操作时自动提权） |
+| `bootstrap.bat` | 运行环境加载 / 修复：目录、工具哈希、ROM、启动项路径、磁盘 | 否 |
+| `pack_release.bat` | 生成发布包（校验 → 打包 → 输出 SHA256） | 否 |
+| `scripts\preflight.bat` | 环境预检，返回码 0=就绪 / 2=告警 / 1=阻断；`--quiet` 静默、`--nopause` 免暂停 | 否 |
+| `scripts\env_check.bat` | 预检 + 启动配置 + 目录信息（给人看的完整版） | 否 |
+| `scripts\status.bat` | 显存/功耗/频率/温度/驱动/vBIOS 版本 | 否 |
 | `scripts\set_powerlimit.bat` | 自选功耗并保存配置 | 是 |
-| `scripts\flash_80w.bat` | 刷入 80 W vBIOS（含风险确认与回滚提示） | 是 |
-| `scripts\flash_60w.bat` | 恢复原厂 60 W vBIOS（安全，随时可执行） | 是 |
-| `scripts\startup_apply.bat` | 开机启动调用（由计划任务触发，无需手动运行） | 计划任务以最高权限运行 |
-| `setup\install_startup.bat` | 安装开机启动项 | 是 |
-| `setup\remove_startup.bat` | 卸载开机启动项 | 是 |
+| `scripts\flash_80w.bat` | 刷入 80 W vBIOS（强制备份 + 风险确认） | 是 |
+| `scripts\flash_60w.bat` | 恢复原厂 vBIOS | 是 |
+| `scripts\backup_vbios.bat` | 备份当前 vBIOS 到 `backups\`，写 `backups\index.txt` | 是 |
+| `scripts\restore_backup.bat` | 列出历史备份并选择刷回（支持 `--latest`） | 是 |
+| `scripts\verify.bat` | 文件完整性校验：编码、SHA256、目录结构、语言表 | 否 |
+| `scripts\startup_apply.bat` | 开机启动调用（由计划任务触发） | 计划任务以最高权限运行 |
+| `setup\install_startup.bat` / `remove_startup.bat` | 安装 / 卸载开机启动项 | 是 |
 
 所有需要权限的脚本都会**自动弹出 UAC 提权**，无需手动右键。
 
@@ -78,38 +126,71 @@ setup\remove_startup.bat      :: 卸载
 ```
 RTX3050Ti-8G-Toolkit/
 ├─ menu.bat                    统一入口
+├─ bootstrap.bat               环境加载 / 修复
+├─ pack_release.bat            生成发布包
+├─ VERSION
+├─ lang/
+│  └─ zh-CN.txt                全部中文 UI 文本（ID|文本，脚本本身纯 ASCII）
 ├─ scripts/
-│  ├─ lib\common.bat           公共函数库（提权/检测/校验/日志）
-│  ├─ env_check.bat            环境自检
-│  ├─ status.bat               状态查询
-│  ├─ set_powerlimit.bat       自选功耗
-│  ├─ flash_80w.bat            刷 80W（含风险确认）
-│  ├─ flash_60w.bat            回滚原厂
-│  └─ startup_apply.bat        开机启动脚本
+│  ├─ lib/
+│  │  ├─ common.bat            调度器式公共库（探测/提权/校验/备份/刷写/消息）
+│  │  ├─ probe.ps1             硬件探测（驱动缺失也能识别）
+│  │  ├─ check_text.ps1        编码与换行校验
+│  │  └─ pack.ps1              打包
+│  ├─ preflight.bat / env_check.bat / status.bat / verify.bat
+│  ├─ set_powerlimit.bat
+│  ├─ flash_80w.bat / flash_60w.bat
+│  ├─ backup_vbios.bat / restore_backup.bat
+│  └─ startup_apply.bat
 ├─ setup/
-│  ├─ install_startup.bat      安装开机启动
-│  └─ remove_startup.bat       卸载开机启动
+│  ├─ install_startup.bat / remove_startup.bat
+│  ├─ task_install.ps1         计划任务注册（Register-ScheduledTask）
+│  └─ startup_launch.ps1       隐藏窗口 launcher
 ├─ roms/
 │  ├─ RTX3050Ti_Laptop_94.07.3a.00.0e.rom   原厂 60W / 8GB
 │  ├─ HP.RTX3050TiMobile.4096.210618.rom     官方签名 80W / 4GB SKU
+│  ├─ SHA256SUMS.txt
 │  └─ SOURCES.md               来源、授权与风险说明
 ├─ tools/
-│  └─ nvflashb.exe             NVIDIA 固件刷写工具（见致谢）
+│  ├─ nvflashb.exe             NVIDIA 固件刷写工具（见致谢）
+│  └─ SHA256SUMS.txt
 ├─ config/
-│  └─ power_profile.txt        功耗配置（由 set_powerlimit.bat 生成）
+│  ├─ power_profile.example.txt   功耗配置样例
+│  └─ power_profile.txt           实际配置（运行后生成）
+├─ backups/                     vBIOS 备份（.gitignore）
+├─ dist/                        发布包产物（.gitignore）
 ├─ docs/
-│  └─ 技术报告-签名机制与刷写结论.md   完整技术分析（为什么不能改 ROM）
-├─ logs/                       运行日志（自动生成，不纳入版本控制）
-└─ README.md
+│  └─ 技术报告-签名机制与刷写结论.md
+├─ logs/                        运行日志（.gitignore）
+└─ .github/workflows/release.yml  CI：打 tag 自动构建 Release
 ```
+
+---
+
+## 打包与发布
+
+```bat
+pack_release.bat            :: 交互式
+pack_release.bat --ci       :: CI 用，不暂停
+```
+
+流程：`verify.bat --pack-mode` 全量校验 → 复制白名单文件 → 剥离运行期产物（日志、备份、个人配置）→ 归一化 CRLF/去 BOM → 生成 `SHA256SUMS.txt` → 打 zip（正斜杠路径，跨平台解压安全）。
+
+产物：`dist\RTX3050Ti-8G-Toolkit_v<版本>_win-x64.zip`，并打印大小与 SHA256。
+
+发布到 GitHub：
+
+1. 新建仓库并 push；
+2. 打 tag（如 `v1.1.0`）后 push，`.github/workflows/release.yml` 会在 `windows-latest` 上自动构建并上传 Release 资产；
+3. 或手动把 `dist\*.zip` 拖到 Release。
+
+> 发布包已在全新目录做过端到端验证：解压 → `verify.bat` 全绿 → `bootstrap.bat` 就绪 → `menu.bat` 正常显示。
 
 ---
 
 ## 故障排查
 
 ### 刷 80 W 后独显不工作（设备管理器代码 10）
-
-这是本工具已知的风险场景（80 W 固件来自 4 GB SKU，冷启动显存训练可能失败）。
 
 ```bat
 scripts\flash_60w.bat
@@ -119,44 +200,93 @@ scripts\flash_60w.bat
 
 ### `nvidia-smi` 不可用 / 找不到命令
 
-说明显卡驱动未加载。先用 `scripts\env_check.bat` 确认状态，再按上面第 3 条处理。
+显卡驱动未加载。先跑 `scripts\env_check.bat` 确认状态，再按上一条处理。
 
 ### 提示"输入无效"或"超过固件允许上限"
 
-固件把功耗墙锁定在某个值（常见 60 W / 85 W / 95 W，视固件而定）。脚本会显示当前实际范围，请在该范围内选择。
+固件把功耗墙锁在某个值（常见 60 W / 85 W / 95 W，视固件而定）。脚本会显示当前实际范围，请在该范围内选择。
 
 ### 设置功耗后回读值没有变化
 
-部分笔记本（含本项目作者使用的机型）在运行时调整功耗墙会被笔记本 EC 拒绝，而 `nvidia-smi` 仍返回成功退出码。因此本工具在应用后会**回读校验**：若数值未变化会给出警告。
+部分笔记本在运行时调整功耗墙会被 EC 拒绝，而 `nvidia-smi` 仍返回退出码 0。本工具在应用后会**回读校验**，未变化时给出警告且不写入配置。
 
-这种情况下功耗只能通过更换 vBIOS 固件调整（`flash_80w.bat` / `flash_60w.bat`）。
+这种情况下功耗只能通过更换 vBIOS 固件调整。
 
 ### 开机启动没有生效
 
-查看 `logs\startup.log`。常见原因：`config\power_profile.txt` 不存在、开机时驱动加载慢于 30 秒（可重新运行 `setup\install_startup.bat` 生成带延迟任务）、或当时显卡驱动加载失败、或该机型不支持运行时调功耗（见上一条）。
+查看 `logs\startup.log`，并重跑 `scripts\preflight.bat` 看"开机启动项"一节：
+
+- `已安装, 但路径指向旧目录` → 目录搬过家/换过盘，重跑 `setup\install_startup.bat`；
+- `未安装` → 没装；
+- 已安装且路径有效但不生效 → 检查 `config\power_profile.txt` 是否存在、开机时驱动加载是否慢于 30 秒。
+
+### 提示"平台已变更"
+
+换过主板 / CPU / 整机，或显存容量与记录不符。这是**预期行为**：先跑 `scripts\backup_vbios.bat` 重新备份，确认无误后再继续。
+
+### 界面出现 `[M0123]` 之类的方括号编号
+
+说明 `lang\zh-CN.txt` 缺失或损坏（消息表未加载）。运行 `scripts\verify.bat` 查看，或重新解压发布包。
 
 ---
 
 ## 脚本编写约定（贡献者必读）
 
-本项目批处理在 Windows `cmd.exe` 下运行，以下约束来自实测踩坑，修改脚本时请遵守：
+以下约束全部来自实测踩坑，改脚本前请先读完。
+
+### 编码与文本
 
 | 约束 | 原因 |
 |---|---|
-| 文件必须保存为 **UTF-8 无 BOM + CRLF** 换行 | BOM 会被 `cmd` 当作命令执行；LF 换行在部分场景异常 |
-| **`rem` 注释只能用 ASCII** | `chcp 65001` 之后，`cmd` 会在多字节注释处丢失文件指针，把注释内容当命令执行（表现为 `'xxx' 不是内部或外部命令`）。中文只能出现在 `echo` 输出中 |
-| **`for /f` 内的逗号必须写成 `^,`** | `--format=csv^,noheader`、`--query-gpu=a^,b`；否则逗号被吞导致 nvidia-smi 报 `Option noheader is not recognized` |
+| `.bat` 文件必须是 **UTF-8 无 BOM + CRLF** 且**内容纯 ASCII** | `chcp 65001` 后 `cmd.exe` 读取含多字节字符的批处理会**文件指针漂移**，随机吞掉行首字符，表现为 `'注意:' 不是内部或外部命令`、`: was unexpected at this time`。插一个空行就能改变故障位置，极难排查 |
+| 所有中文 UI 文本放 `lang\zh-CN.txt`，格式 `M0001\|文本` | 脚本只用 `call "%LIB%" msg M0001` 引用。新增文案只需加一行，不动批处理 |
+| `lang\*.txt` 必须是 CRLF、无 BOM | `for /f` 逐行载入，BOM 会污染第一个 ID |
+
+### 消息表机制（重要）
+
+```
+载入：init 时一次性把 M0001..M03xx 读进 MSG_M0001 环境变量（O(1) 查表）
+查表：msgs 取 !MSG_<ID>!，做 {1}..{6} 位置替换，再用一次 for 变量回注完成 !VAR! 展开
+输出：call echo %%MSGTXT%%
+```
+
+| 约束 | 原因 |
+|---|---|
+| 占位符在 `lang\zh-CN.txt` 里写成 `^!VAR^!` | 载入时 `for` 变量替换会先注入文本，caret 让 `!` 逃过那一轮延迟展开；随后查表时的一次 for 回注才会真正展开 |
+| 文本里的变量必须用 `!VAR!`，**不能用 `%VAR%`** | `call echo %%MSGTXT%%` 只有两轮展开，`%VAR%` 出现在第二轮之后，永远不会被展开（实测会原样打印 `%GPU_VRAM_MB%`） |
+| 不要在消息文本里写 `%%a` 这类 for 变量 | 消息是运行时字符串，for 变量在写入时已失效；应改成 `{1}` 占位符，由调用方传参 |
+
+### 批处理语法
+
+| 约束 | 原因 |
+|---|---|
+| `for /f ... in ("文件路径")` 必须加 `usebackq` | 否则引号内容被当字面量解析，读不到文件 |
+| `for /f` 内的逗号必须写成 `^,` | `--format=csv^,noheader`、`--query-gpu=a^,b`；否则逗号被吞，nvidia-smi 报 `Option noheader is not recognized` |
 | 括号块内一律用 `!VAR!`，不要用 `%VAR%` | 块内 `%VAR%` 在解析期展开，拿到的是调用前的旧值 |
-| 跨文件调用统一用 `call "lib\common.bat" <命令> "参数"` | `cmd` 不支持 `call :label` 跨文件；调度器模式且库内不能用 `setlocal`，否则变量无法传回 |
-| **传给调度器的多词文本必须加引号** | 未加引号时只有第一个词会作为 `%~2` 被接收 |
-| 数值校验在调用方内联实现 | 跨文件 `call` 中的 `for /f` 解析行为与单文件内不一致，实测会导致合法值被误判 |
-| 应用功耗后必须回读校验 | `nvidia-smi -pl` 在被 EC 拒绝时仍返回退出码 0 |
+| 块内 `echo` 文本不能含半角 `(` `)` | 会提前闭合括号块，报 `: was unexpected at this time` |
+| 块内 `echo` 文本不能含 `!` | 延迟展开会把 `[!]` 吃掉，改用 `[WARN]` |
+| `chcp 65001` 只在入口脚本执行一次 | `common.bat` 每条消息被调用一次，里面再跑 `chcp` 等于每条消息多一次进程创建（实测 +10 ms/条） |
+| 跨文件调用统一用 `call "lib\common.bat" <命令> "参数"` | `cmd` 不支持跨文件 `call :label`；调度器模式且库内不能用 `setlocal`，否则变量传不回 |
+| 传参一律加引号 | 未加引号时含空格的参数会被截断 |
+| 需要管理员时先检查 `net session` | `nvflash` 在非管理员下打开显示驱动失败会**无限期挂起**，必须前置拦截 |
+| 应用功耗后必须回读校验 | `nvidia-smi -pl` 被 EC 拒绝时仍返回退出码 0 |
+
+### 自检
+
+提交前跑：
+
+```bat
+scripts\verify.bat
+```
+
+会检查：所有 `.bat` 编码/换行/ASCII 注释、`nvflashb.exe` 与两个 ROM 的 SHA256、目录结构完整性、`lang\zh-CN.txt` 是否存在。
 
 ---
 
 ## 环境要求
 
-- Windows 10 / 11（x64）
+- Windows 10 (1809+) / Windows 11（x64）
+- PowerShell 5.1（系统自带）
 - NVIDIA 驱动已安装，且能识别到 RTX 3050 Ti **Laptop**
 - 刷写功能需要管理员权限（脚本自动提权）
 - 磁盘约 25 MB（工具本体）+ 2 MB（ROM）
@@ -165,7 +295,7 @@ scripts\flash_60w.bat
 
 ## 技术结论摘要
 
-为什么本项目不提供"修改 ROM 功耗值再刷入"的功能？以下是实测结论（完整版见 `docs/技术报告-签名机制与刷写结论.md`）：
+为什么本项目不提供"修改 ROM 功耗值再刷入"的功能？（完整版见 `docs/技术报告-签名机制与刷写结论.md`）
 
 1. RTX 30 系起 NVIDIA 启用 **BIOS Certificate 2.0（RSA 签名 + HMAC 校验）**，覆盖整个 vBIOS 镜像；
 2. 改一个字节即签名失效，**无法伪造**（需要 NVIDIA 私钥）；

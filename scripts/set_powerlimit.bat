@@ -2,96 +2,110 @@
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 rem ============================================================================
-rem set_powerlimit.bat - (Default Power Limit)
-rem :
-rem set_powerlimit.bat
-rem set_powerlimit.bat 70
-rem config\power_profile.txt,
-rem setup\install_startup.bat
+rem set_powerlimit.bat - set runtime power limit and persist the profile
+rem
+rem   set_powerlimit.bat        interactive
+rem   set_powerlimit.bat 70     non-interactive
+rem   set_powerlimit.bat 0      reset to firmware default
 rem ============================================================================
 cd /d "%~dp0"
 set "LIB=%~dp0lib\common.bat"
 call "%LIB%" init
 
-call "%LIB%" require_admin "%~f0" %*
+call "%LIB%" require_admin "%~f0" %1
 if errorlevel 1 exit /b
 call "%LIB%" is_admin
+call "%LIB%" probe
 call "%LIB%" find_smi
-call "%LIB%" check_gpu
 call "%LIB%" power_csv
 
-call "%LIB%" title "设置功耗上限"
-if not "%GPU_FOUND%"=="0" (
-    call "%LIB%" err "未检测到 NVIDIA 显卡"
+call "%LIB%" title M0267
+
+if not "%GPU_PRESENT%"=="1" (
+    call "%LIB%" err M0268
+    call "%LIB%" msg M0269
     echo.
     pause
     exit /b 1
 )
-if not defined PWR_MAX (
-    call "%LIB%" err "无法读取当前功耗范围, 请确认驱动正常"
+if not defined PWR_MAX_I (
+    call "%LIB%" err M0270
+    call "%LIB%" msg M0271
     echo.
     pause
     exit /b 1
 )
 
-echo   显卡          : !GPU_NAME!
-echo   当前 Default  : !PWR_DEF! W
-echo   固件允许上限  : !PWR_MAX! W
+call "%LIB%" msg M0272
+call "%LIB%" msg M0273
+call "%LIB%" msg M0274
+if "%GPU_VRAM_MB%"=="8192" call "%LIB%" msg M0275
 echo.
+call "%LIB%" msg M0276
+echo.
+
 set "TARGET=%~1"
 if not defined TARGET (
-    set /p TARGET=请输入目标功耗 1-!PWR_MAX! W 直接回车保持当前值 :
+    call "%LIB%" msgs M0277
+    set /p TARGET=!MSGTXT!
 )
-if not defined TARGET set "TARGET=%PWR_DEF!"
+if not defined TARGET set "TARGET=%PWR_DEF_I%"
 
-rem ---- inline numeric validation (cross-file call is unreliable, so validate here) ----
-set "TARGET=%TARGET:W%"
+rem ---- inline numeric validation: cross-file for /f is unreliable here ----
+set "TARGET=%TARGET:W=%"
+set "TARGET=%TARGET:w=%"
 set "TARGET=%TARGET: =%"
 set "NONNUM="
 for /f "delims=0123456789" %%a in ("%TARGET%") do set "NONNUM=%%a"
 if "%TARGET%"=="" (
-    call "%LIB%" err "未输入功耗值, 已取消"
+    call "%LIB%" err M0278
     goto :fail
 )
 if defined NONNUM (
-    call "%LIB%" err "输入无效: %TARGET% - 需要 1 到 !PWR_MAX! 之间的整数"
+    call "%LIB%" err M0279
     goto :fail
 )
 
-if !TARGET! lss 1 (
-    call "%LIB%" err "目标功耗必须不低于 1 W"
+if "%TARGET%"=="0" (
+    set "TARGET=!PWR_DEF_I!"
+    call "%LIB%" info M0280
+)
+
+if !TARGET! LSS !PWR_MIN_I! (
+    call "%LIB%" err M0281
     goto :fail
 )
-if !TARGET! gtr !PWR_MAX! (
-    call "%LIB%" err "目标功耗 !TARGET! W 超过固件允许上限 !PWR_MAX! W"
-    echo   当前固件把功耗墙锁定在 !PWR_MAX! W, 若需更高只能更换 vBIOS。
+if !TARGET! GTR !PWR_MAX_I! (
+    call "%LIB%" err M0282
+    call "%LIB%" msg M0283
     goto :fail
 )
 
 echo.
-echo   正在应用: !TARGET! W ...
-"%SMI%" -pl !TARGET! 2>&1
-if errorlevel 1 (
-    echo.
-    call "%LIB%" err "设置失败。若提示 Insufficient Permissions 请以管理员身份运行"
-    goto :fail
-)
-
-if not exist "%CONFIG%" mkdir "%CONFIG%" >nul 2>&1
-> "%CONFIG%\power_profile.txt" echo !TARGET!
-call "%LIB%" log "%LOGS%\set_power.log" "power limit set to !TARGET! W"
+call "%LIB%" msg M0284
+nvidia-smi.exe -pl !TARGET! 2>&1
+set "APPLY_RC=!ERRORLEVEL!"
 
 call "%LIB%" power_csv
-if "!PWR_DEF!"=="!TARGET!" (
-    call "%LIB%" ok "功耗上限已设置为 !TARGET! W"
+set "OK=0"
+if "!PWR_DEF_I!"=="!TARGET!" set "OK=1"
+
+if "!OK!"=="1" (
+    call "%LIB%" ok M0285
+    > "%CONFIG%\power_profile.txt" echo !TARGET!
+    call "%LIB%" log "%LOGS%\set_power.log" "power limit set to !TARGET! W, readback !PWR_DEF!"
 ) else (
-    call "%LIB%" warn "已提交 !TARGET! W, 但回读值为 !PWR_DEF! W"
-    echo   常见原因: 笔记本 EC 不允许调整, 或需要管理员权限, 或该机型不支持运行时调功耗
-    echo   此时可改用 flash_80w.bat / flash_60w.bat 通过固件调整功耗
+    call "%LIB%" warn M0286
+    call "%LIB%" msg M0287
+    call "%LIB%" msg M0288
+    call "%LIB%" msg M0289
+    call "%LIB%" msg M0290
+    call "%LIB%" msg M0291
+    del /f /q "%CONFIG%\power_profile.txt" >nul 2>&1
 )
-echo   当前 Default  : !PWR_DEF! W
-echo   配置已保存  : config\power_profile.txt
-echo   可运行 setup\install_startup.bat 使其在每次开机时自动应用。
+
+echo.
+call "%LIB%" msg M0292
 goto :the_end
 
 :fail

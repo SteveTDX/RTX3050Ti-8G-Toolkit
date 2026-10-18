@@ -2,59 +2,97 @@
 chcp 65001 >nul
 setlocal EnableDelayedExpansion
 rem ============================================================================
-rem flash_60w.bat - 60W vBIOS ( , )
-rem : 80W ,
+rem flash_60w.bat - restore the original vBIOS
+rem
+rem Default : newest file in backups\ (the real factory image of THIS machine)
+rem Fallback: roms\RTX3050Ti_Laptop_94.07.3a.00.0e.rom (author reference dump)
+rem
+rem   flash_60w.bat               auto select
+rem   flash_60w.bat --reference   force the bundled reference ROM
 rem ============================================================================
 cd /d "%~dp0"
 set "LIB=%~dp0lib\common.bat"
 call "%LIB%" init
 
-set "ROM=%ROMS%\RTX3050Ti_Laptop_94.07.3a.00.0e.rom"
-set "LOG=%LOGS%\flash_60w.log"
+set "REFROM=%ROMS%\RTX3050Ti_Laptop_94.07.3a.00.0e.rom"
+set "CLOG=%LOGS%\flash_60w.log"
 
-call "%LIB%" require_admin "%~f0" %*
+call "%LIB%" require_admin "%~f0" %1
 if errorlevel 1 exit /b
 call "%LIB%" is_admin
-call "%LIB%" find_smi
-call "%LIB%" check_gpu
+call "%LIB%" probe
+call "%LIB%" title M0093
 
-call "%LIB%" title "恢复原厂 60W vBIOS"
-call "%LIB%" check_files "%TOOLS%\nvflashb.exe" "" "刷写工具"
-if errorlevel 1 (pause & exit /b 1)
-call "%LIB%" check_files "%ROM%" "999424" "原厂 ROM"
-if errorlevel 1 (pause & exit /b 1)
+if not exist "%TOOLS%\nvflashb.exe" (
+    call "%LIB%" err M0094
+    call "%LIB%" msg M0095
+    echo.
+    pause
+    exit /b 1
+)
 
-echo   目标固件      : RTX3050Ti_Laptop_94.07.3a.00.0e - 本机原厂备份
-echo   目标功耗      : Default 60 W
-echo   说明          : 官方签名固件, 不涉及签名风险, 任何状态下均可执行
+set "USE_BACKUP=0"
+set "ROM="
+if /i "%~1"=="--reference" goto :use_ref
+for /f "delims=" %%F in ('dir /b /o-d "%BACKUPS%\*.rom" 2^>nul') do (
+    if not defined ROM set "ROM=%BACKUPS%\%%F"
+)
+if defined ROM set "USE_BACKUP=1"
+:use_ref
+if not defined ROM set "ROM=%REFROM%"
+
+if not exist "!ROM!" (
+    call "%LIB%" err M0096
+    call "%LIB%" msg M0097
+    call "%LIB%" msg M0098
+    echo.
+    pause
+    exit /b 1
+)
+
+if "%USE_BACKUP%"=="1" (
+    call "%LIB%" msg M0099
+    call "%LIB%" msg M0100
+) else (
+    call "%LIB%" msg M0101
+    call "%LIB%" msg M0102
+    echo.
+    call "%LIB%" warn M0103
+    call "%LIB%" msg M0104
+)
+
+call "%LIB%" msg M0105
+call "%LIB%" msg M0106
+call "%LIB%" msg M0107
 echo.
 set "ANS="
-set /p ANS=确认执行请直接回车, 输入其他内容取消:
-if not "%ANS%"=="" (
-    call "%LIB%" info "已取消"
+call "%LIB%" msgs M0108
+set /p ANS=!MSGTXT!
+if not "!ANS!"=="" (
+    call "%LIB%" info M0109
     goto :the_end
 )
 
 echo.
-echo   [1/2] 解除 EEPROM 写保护...
-"%TOOLS%\nvflashb.exe" --protectoff >>"%LOG%" 2>&1
-echo   [2/2] 写入原厂固件, 请勿中断...
-"%TOOLS%\nvflashb.exe" --log="%LOG%" -6 "%ROM%"
-set "RC=%ERRORLEVEL%"
+call "%LIB%" msg M0110
+call "%LIB%" msg M0111
+call "%LIB%" flash_rom "!ROM!" "%CLOG%"
 echo.
-if "%RC%"=="0" (
-    call "%LIB%" ok "恢复成功"
-    echo   请重启, 然后运行 scripts\status.bat 确认
-    echo   若独显仍异常, 说明并非固件问题, 请检查设备管理器错误代码
+
+if "%FLASH_RC%"=="0" (
+    call "%LIB%" ok M0112
+    call "%LIB%" msg M0113
 ) else (
-    call "%LIB%" err "写入失败, 退出码 %RC%"
-    echo   若设备处于代码 10 状态 nvflash 可能找不到设备, 处理方法:
-    echo     1. 设备管理器 - 显示适配器 - 右键 Microsoft 基本显示适配器
-    echo     2. 选择 卸载设备, 不要勾选 删除驱动程序软件
-    echo     3. 重新运行本脚本
-    echo   详细日志: %LOG%
+    call "%LIB%" err M0114
+    if not "%FLASH_HINT%"=="" echo   %FLASH_HINT%
+    echo.
+    call "%LIB%" msg M0115
+    call "%LIB%" msg M0116
+    call "%LIB%" msg M0117
+    call "%LIB%" msg M0118
+    call "%LIB%" msg M0119
 )
-call "%LIB%" log "%LOG%" "flash_60w exit=%RC%"
+call "%LIB%" log "%LOGS%\flash_history.log" "flash_60w rc=%FLASH_RC% state=%FLASH_STATE% rom=!ROM!"
 
 :the_end
 echo.
