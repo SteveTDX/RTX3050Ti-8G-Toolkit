@@ -4,6 +4,23 @@ Windows 批处理工具集：检测环境、查看状态、**自选功耗**、�
 
 针对"4 GB 颗粒魔改为 8 GB"的 RTX 3050 Ti Laptop 显卡设计。所有脚本在执行前会自动校验本机环境（系统版本、驱动、硬件 ID、显存、文件完整性、功耗范围、平台是否变更），不匹配时主动中止并说明原因。
 
+仓库：<https://github.com/SteveTDX/RTX3050Ti-8G-Toolkit> · 发布包：<https://github.com/SteveTDX/RTX3050Ti-8G-Toolkit/releases/latest>
+
+---
+
+## 获取
+
+两种方式，二选一：
+
+```bat
+:: 方式一：克隆仓库
+git clone https://github.com/SteveTDX/RTX3050Ti-8G-Toolkit.git
+```
+
+方式二：从 [Releases](https://github.com/SteveTDX/RTX3050Ti-8G-Toolkit/releases/latest) 下载 `RTX3050Ti-8G-Toolkit_v1.1.0_win-x64.zip`，解压到任意目录（路径可含空格和中文），双击 `menu.bat` 即可。
+
+两种方式都不需要安装 Python / Node / .NET，只用 Windows 自带的 `cmd.exe` 与 PowerShell 5.1。
+
 ---
 
 ## ⚠️ 先读这一段（风险与适用性）
